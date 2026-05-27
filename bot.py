@@ -1,12 +1,29 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+import json
 import os
 
 # ============================================================
 TOKEN = "8956267241:AAFJwoo86GF3mtrQ5p6t_Yh7BDUJbEwN7ms"
 # ============================================================
 
-favorites_db = {}
+# Файл для сохранения избранного (чтобы не терялось при перезапуске)
+FAVORITES_FILE = "favorites.json"
+
+def load_favorites():
+    """Загружает избранное из файла"""
+    if os.path.exists(FAVORITES_FILE):
+        with open(FAVORITES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def save_favorites(favorites):
+    """Сохраняет избранное в файл"""
+    with open(FAVORITES_FILE, 'w', encoding='utf-8') as f:
+        json.dump(favorites, f, ensure_ascii=False, indent=2)
+
+# Загружаем избранное при старте
+favorites_db = load_favorites()
 
 # ============================================================
 # ВСЕ 51 ТЕРМИН
@@ -70,16 +87,13 @@ term_data = {
 # ============================================================
 def find_term(text):
     text = text.strip()
-    # По номеру
     if text.isdigit():
         num = int(text)
         if 1 <= num <= 51:
             return num, term_data[num]
-    # По китайским иероглифам
     for num, data in term_data.items():
         if data["chinese"] == text:
             return num, data
-    # По русскому слову
     for num, data in term_data.items():
         if text.lower() in data["ru"].lower():
             return num, data
@@ -98,28 +112,41 @@ def get_user_id(update):
 # КОМАНДЫ БОТА
 # ============================================================
 async def start(update, context):
-    user_id = get_user_id(update)
+    user_id = str(get_user_id(update))
     if user_id not in favorites_db:
         favorites_db[user_id] = []
+        save_favorites(favorites_db)
+    
     keyboard = [
         [InlineKeyboardButton("🔍 Найти термин", callback_data="find")],
-        [InlineKeyboardButton("📚 Избранное", callback_data="favorites")],
+        [InlineKeyboardButton("📚 Моё избранное", callback_data="favorites")],
         [InlineKeyboardButton("📋 Список 1-51", callback_data="list_all")],
         [InlineKeyboardButton("❓ Помощь", callback_data="help")]
     ]
     text = "🇨🇳 **ChinaEconomicsBot**\n\nБот для изучения китайских экономических терминов.\n\n**Что вводить:**\n• Номер от 1 до 51\n• Китайские иероглифы\n• Русское слово\n\nПример: `21`, `经济`, `экономика`"
+    
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def show_term(update, context, num, data, is_callback=True):
+    user_id = str(get_user_id(update))
+    favs = favorites_db.get(user_id, [])
+    is_favorite = data["chinese"] in favs
+    
     text = f"📌 **{num}. {data['chinese']}**\n\n🎵 {data['pinyin']} (тоны: {data['tones']})\n\n🇷🇺 {data['ru']}\n\n📖 **Пример:**\n“{data['example_cn']}”\n→ {data['example_ru']}"
+    
+    # Кнопка добавления/удаления из избранного
+    fav_button_text = "❤️ Удалить из избранного" if is_favorite else "💾 Добавить в избранное"
+    
     keyboard = [
+        [InlineKeyboardButton(fav_button_text, callback_data=f"fav_{num}_{data['chinese']}")],
         [InlineKeyboardButton("⬅️ Назад", callback_data=f"prev_{num}"), InlineKeyboardButton("Вперед ➡️", callback_data=f"next_{num}")],
         [InlineKeyboardButton("🔍 Новый поиск", callback_data="find")],
         [InlineKeyboardButton("🔙 Меню", callback_data="menu")]
     ]
+    
     if is_callback and update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     elif update.message:
@@ -136,23 +163,24 @@ async def button_callback(update, context):
     query = update.callback_query
     await query.answer()
     data = query.data
+    user_id = str(get_user_id(update))
     
     if data == "menu":
         await start(update, context)
     elif data == "find":
         await query.edit_message_text("🔍 **Введите номер, иероглифы или русское слово**", parse_mode="Markdown")
     elif data == "favorites":
-        user_id = get_user_id(update)
         favs = favorites_db.get(user_id, [])
         if favs:
-            text = "📚 **Избранное:**\n\n"
+            text = "📚 **Ваше избранное:**\n\n"
             for i, term in enumerate(favs, 1):
                 for num, td in term_data.items():
                     if td["chinese"] == term:
                         text += f"{i}. {term} — {td['ru']}\n"
                         break
+            text += "\n🗑️ Чтобы удалить термин, нажмите /delete"
         else:
-            text = "📚 Избранное пусто"
+            text = "📚 У вас пока нет сохранённых терминов.\n\nЧтобы добавить — найдите термин и нажмите «Добавить в избранное»."
         await query.edit_message_text(text, parse_mode="Markdown")
     elif data == "list_all":
         text = "📋 **Список терминов (1-51):**\n\n"
@@ -160,8 +188,30 @@ async def button_callback(update, context):
             text += f"{i}. {term_data[i]['chinese']} — {term_data[i]['ru']}\n"
         await query.edit_message_text(text, parse_mode="Markdown")
     elif data == "help":
-        text = "❓ **Помощь**\n\n/start - Главное меню\n/delete - Очистить избранное\n\nВведите номер (1-51), иероглифы или русское слово для поиска"
+        text = "❓ **Помощь**\n\n/start - Главное меню\n/delete - Удалить последний термин из избранного\n\n**Что можно делать:**\n• Ввести номер (1-51)\n• Ввести иероглифы\n• Ввести русское слово\n• Сохранять термины в избранное"
         await query.edit_message_text(text, parse_mode="Markdown")
+    
+    elif data.startswith("fav_"):
+        # Формат: fav_номер_термин
+        parts = data.split("_", 2)
+        if len(parts) >= 3:
+            num = int(parts[1])
+            term = parts[2]
+            favs = favorites_db.get(user_id, [])
+            
+            if term in favs:
+                favs.remove(term)
+                await query.edit_message_text(f"🗑️ Термин «{term}» удалён из избранного.")
+            else:
+                favs.append(term)
+                await query.edit_message_text(f"✅ Термин «{term}» добавлен в избранное!")
+            
+            favorites_db[user_id] = favs
+            save_favorites(favorites_db)
+            
+            # Через секунду показываем обновлённый термин
+            await show_term(update, context, num, term_data[num], True)
+    
     elif data.startswith("next_"):
         num = int(data[5:])
         next_num = num + 1 if num < 51 else 1
@@ -172,15 +222,18 @@ async def button_callback(update, context):
         await show_term(update, context, prev_num, term_data[prev_num], True)
 
 async def delete_command(update, context):
-    user_id = get_user_id(update)
-    if favorites_db.get(user_id):
-        favorites_db[user_id] = []
-        await update.message.reply_text("🗑️ Избранное очищено")
+    user_id = str(get_user_id(update))
+    favs = favorites_db.get(user_id, [])
+    if favs:
+        removed = favs.pop()
+        favorites_db[user_id] = favs
+        save_favorites(favorites_db)
+        await update.message.reply_text(f"🗑️ Термин «{removed}» удалён из избранного.")
     else:
-        await update.message.reply_text("Избранное пусто")
+        await update.message.reply_text("📚 Ваше избранное пусто.")
 
 # ============================================================
-# ЗАПУСК (исправленная версия)
+# ЗАПУСК
 # ============================================================
 if __name__ == "__main__":
     app = Application.builder().token(TOKEN).build()
@@ -190,4 +243,5 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(button_callback))
     
     print("🤖 Бот запущен! Все 51 термин загружены.")
+    print("📚 Функция избранного работает и сохраняется в файл.")
     app.run_polling()
