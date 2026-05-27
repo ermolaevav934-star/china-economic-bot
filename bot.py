@@ -3,7 +3,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 import os
 
 # ============================================================
-TOKEN = "ВАШ_ТОКЕН_СЮДА"
+TOKEN = "8956267241:AAFJwoo86GF3mtrQ5p6t_Yh7BDUJbEwN7ms"
 # ============================================================
 
 favorites_db = {}
@@ -180,13 +180,14 @@ async def delete_command(update, context):
         await update.message.reply_text("Избранное пусто")
 
 # ============================================================
-# ЗАПУСК
+# ЗАПУСК (исправленная версия)
 # ============================================================
-app = Application.builder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("delete", delete_command))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-app.add_handler(CallbackQueryHandler(button_callback))
-
-print("🤖 Бот запущен! Все 51 термин загружены.")
-app.run_polling()
+if __name__ == "__main__":
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("delete", delete_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_callback))
+    
+    print("🤖 Бот запущен! Все 51 термин загружены.")
+    app.run_polling()
